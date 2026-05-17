@@ -33,6 +33,7 @@ bot.setMyCommands([
   { command: 'topuppoint', description: 'Topup poin & upgrade tier' },
   { command: 'claimdaily', description: 'Klaim bonus harian' },
   { command: 'sendsubscribe', description: 'Beli langganan anon chat sendmessage' },
+  { command: 'setmessagequota', description: '(Owner) Atur kuota sendmessage pengguna' },
   { command: 'aboutdev', description: 'Info developer & dukungan' },
   { command: 'help', description: 'Pusat bantuan' },
   { command: 'setpoint', description: '(Owner) Atur poin user' },
@@ -692,7 +693,7 @@ bot.onText(/\/settier(?:\s+(\d+)\s+(\S+)(?:\s+(\d+))?)?/i, async (msg, match) =>
   }
 });
 
-bot.onText(/\/setmessagequota(?:\s+(\d+)\s+(\d+))?/i, async (msg, match) => {
+bot.onText(/\/sett?messagequota(?:\s+(\d+)\s+(\d+))?/i, async (msg, match) => {
   const chatId = String(msg.chat.id).trim();
   const fromId = String(msg.from?.id).trim();
   if (fromId !== String(OWNER_ID)) return bot.sendMessage(chatId, 'Hanya Owner yang dapat menggunakan perintah ini.');
