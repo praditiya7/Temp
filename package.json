@@ -8,14 +8,19 @@
     "dev": "nodemon bot.js"
   },
   "dependencies": {
-    "node-telegram-bot-api": "^0.64.0",
-    "axios": "^1.6.0",
-    "dotenv": "^16.3.1"
+    "axios": "^1.16.1",
+    "dotenv": "^16.6.1",
+    "node-telegram-bot-api": "^0.64.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
   },
-  "keywords": ["telegram", "bot", "mail", "temp-mail"],
+  "keywords": [
+    "telegram",
+    "bot",
+    "mail",
+    "temp-mail"
+  ],
   "author": "Fixed by Grok",
   "license": "MIT"
 }

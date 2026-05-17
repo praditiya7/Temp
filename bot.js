@@ -34,7 +34,9 @@ bot.setMyCommands([
   { command: 'claimdaily', description: '🎁 Klaim bonus 10 poin harian kamu' },
   { command: 'aboutdev', description: '👨‍💻 Informasi Developer & Link Dukungan' },
   { command: 'help', description: '🙋‍♀️ Butuh bantuan? Sesi premium hilang?' },
-  { command: 'paneladmin', description: '👑 Menu Rahasia Developer (Owner Only)' } // <-- MENU BARU!
+  { command: 'paneladmin', description: '👑 Menu Rahasia Developer (Owner Only)' }, // <-- MENU BARU!
+  { command: 'setpoint', description: '🔧 (Owner) Set poin user secara langsung' },
+  { command: 'settier', description: '🔧 (Owner) Set tier user secara langsung' }
 ]).catch((err) => console.error("Gagal melakukan set perintah menu:", err.message));
 
 // ANTI-SPAM RATE LIMITER
@@ -81,6 +83,24 @@ async function writeDB(data) {
   }
 }
 
+// Audit logging for admin actions
+async function appendAuditLog(operatorId, action, targetId, before, after) {
+  const logPath = path.join(__dirname, 'audit.log');
+  const entry = {
+    timestamp: new Date().toISOString(),
+    operatorId: String(operatorId),
+    action: String(action),
+    targetId: String(targetId),
+    before: before === undefined ? null : before,
+    after: after === undefined ? null : after
+  };
+  try {
+    await fs.appendFile(logPath, JSON.stringify(entry) + '\n');
+  } catch (err) {
+    console.error('Audit Log Error:', err.message);
+  }
+}
+
 async function verifyUser(chatId, firstName) {
   const db = await readDB();
   const today = getJakartaDateString();
@@ -88,7 +108,7 @@ async function verifyUser(chatId, firstName) {
 
   if (!db.users[chatId]) {
     db.users[chatId] = {
-      name: firstName || 'Kakak Cantik/Ganteng',
+      name: firstName || 'Pengguna',
       points: 10,
       activeEmail: null,
       activeEmailToken: null,
@@ -116,7 +136,7 @@ async function verifyUser(chatId, firstName) {
     db.users[chatId].tierExpiry = null;
     await writeDB(db);
     try {
-      await bot.sendMessage(chatId, `⚠️ *Masa Langganan Habis yaa, Sayang..* Rose sedih banget ih..\n\nHalo Kakak.. Masa paket premium kamu sudah berakhir nih. Status akun kamu otomatis kembali ke B-Tier (Free) yaa. Mau perpanjang lagi biar makin eksklusif? Yuk langsung cek di /topuppoint 💕`, { parse_mode: 'Markdown' });
+      await bot.sendMessage(chatId, `⚠️ *Masa Langganan Telah Berakhir*\n\nHalo, masa paket premium kamu telah berakhir. Status akun kamu otomatis kembali ke B-Tier (Free). Untuk memperpanjang, silakan cek /topuppoint.`, { parse_mode: 'Markdown' });
     } catch {}
   }
 
@@ -129,7 +149,7 @@ async function verifyUser(chatId, firstName) {
       db.users[chatId].emailExpiry = null;
       await writeDB(db);
       try {
-        await bot.sendMessage(chatId, `⏰ *Yah, Email Terhapus Otomatis..*\n\nMasa aktif email temporary kamu sudah habis nih, Kakak Cantik/Ganteng. Aku terpaksa menghapusnya demi keamanan data kamu. Kalau butuh lagi, silakan buat yang baru yaa! Semangat! ✨`, { parse_mode: 'Markdown' });
+        await bot.sendMessage(chatId, `⏰ *Email Otomatis Dihapus*\n\nMasa aktif email temporary kamu telah berakhir dan email telah dihapus demi keamanan. Jika kamu membutuhkan sesi baru, silakan buat yang baru.`, { parse_mode: 'Markdown' });
       } catch {}
     }
   }
@@ -167,28 +187,28 @@ async function apiCall(url, options = {}, retries = 3) {
 // -------------------------------------------------------------
 bot.onText(/\/(start|menu)/i, async (msg) => {
   const chatId = String(msg.chat.id).trim();
-  if (!checkRateLimit(chatId)) return bot.sendMessage(chatId, "⏳ Ih, sabar dong Kakak.. Aku kewalahan nih, tunggu 5 detik yaa~");
+  if (!checkRateLimit(chatId)) return bot.sendMessage(chatId, "⏳ Sistem sedang sibuk — silakan tunggu 5 detik lalu coba lagi.");
 
   await verifyUser(chatId, msg.from.first_name);
   
-  const text = `🎀 *Halo Kakak Sayang! Selamat Datang di Dashboard Utama* 🎀
+  const text = `🎀 *Halo — Selamat Datang di Dashboard Utama* 🎀
 
-Aku siap banget nih bantuin kamu buat sediain email temporary yang aman, cepat, dan terpercaya! Yuk lihat fitur-fitur manis yang bisa kamu gunakan:
+Bot ini siap membantu kamu menyiapkan email sementara yang aman, cepat, dan terpercaya. Berikut fitur yang tersedia:
 
-*✨ Fitur Pembuatan Email Temporary*
-🎲 /CreateMailR • Buat Sesi Email Acak (Random)
-✍️ /CreateMailC • Buat Sesi Email Kustom Nama Kamu
-📥 /CheckInbox • Periksa Kotak Masuk / Kode OTP Kamu
-⏰ /EmailActive • Lihat Sisa Waktu Sesi Email Aktif
+*✨ Fitur Pembuatan Email Sementara*
+🎲 /CreateMailR • Buat sesi email acak (Random)
+✍️ /CreateMailC • Buat sesi email kustom
+📥 /CheckInbox • Periksa kotak masuk / kode OTP
+⏰ /EmailActive • Lihat sisa waktu sesi email aktif
 
 *👑 Menu Akun & Layanan Premium*
-👤 /Profile • Intip Saldo Poin & Level Tier Kamu
-💳 /TopupPoint • Isi Koin Poin & Upgrade Premium
-🎁 /ClaimDaily • Ambil Hadiah Bonus 10 Poin Harian
-🙋‍♀️ /Help • Pusat Bantuan & Pengaduan Sesi Hilang
-👨‍💻 /AboutDev • Berkenalan Sama Developer Bot
+👤 /Profile • Cek saldo poin & level tier
+💳 /TopupPoint • Topup poin & upgrade premium
+🎁 /ClaimDaily • Klaim bonus 10 poin harian
+🙋‍♀️ /Help • Pusat bantuan
+👨‍💻 /AboutDev • Informasi developer
 
-_Caranya gampang banget, tinggal ketuk salah satu perintah berwarna biru di atas yang kamu butuhkan yaa, Kakak Cantik/Ganteng! Happy deploying~ 💕_`;
+Gunakan perintah di atas sesuai kebutuhan.`;
 
   try { await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' }); } catch (err) {}
 });
@@ -213,7 +233,7 @@ bot.onText(/\/profile/i, async (msg) => {
   }
 
   const expInfo = user.tierExpiry ? `\n• 📅 *Masa Aktif Premium:* \`${new Date(user.tierExpiry).toLocaleDateString('id-ID')}\`` : '';
-  let emailStatusText = 'Belum ada sesi aktif nih, Kak..';
+  let emailStatusText = 'Belum ada sesi aktif.';
   
   if (user.activeEmail && user.emailExpiry) {
     const diffMs = new Date(user.emailExpiry).getTime() - Date.now();
@@ -247,12 +267,12 @@ bot.onText(/\/emailactive/i, async (msg) => {
   const user = await verifyUser(chatId, msg.from.first_name);
 
   if (!user.activeEmail || !user.emailExpiry) {
-    return bot.sendMessage(chatId, `❌ *Duh, Sesi Tidak Ditemukan..*\n\nSaat ini Kakak tidak memiliki sesi email temporary yang aktif nih. Yuk buat dulu lewat menu /createmailr atau /createmailc yaa, cantik!`, { parse_mode: 'Markdown' });
+    return bot.sendMessage(chatId, `❌ *Sesi Tidak Ditemukan*\n\nSaat ini kamu tidak memiliki sesi email temporary yang aktif. Silakan buat sesi baru menggunakan /createmailr atau /createmailc.`, { parse_mode: 'Markdown' });
   }
 
   const diffMs = new Date(user.emailExpiry).getTime() - Date.now();
   if (diffMs <= 0) {
-    return bot.sendMessage(chatId, `❌ *Yah, Sesi Baru Saja Habis..*\n\nSesi email temporary kamu barusan banget kedalwarsa Kak. Buruan buat sesi baru lagi gih biar gak ketinggalan OTP-nya!`, { parse_mode: 'Markdown' });
+    return bot.sendMessage(chatId, `❌ *Sesi Telah Berakhir*\n\nSesi email temporary kamu baru saja berakhir. Silakan buat sesi baru jika masih membutuhkan akses ke email sementara.`, { parse_mode: 'Markdown' });
   }
 
   const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
@@ -264,15 +284,7 @@ bot.onText(/\/emailactive/i, async (msg) => {
     hour12: false
   }).replace(/\./g, ':');
 
-  const activeText = `📧 *Detail Sesi Email yang Sedang Aktif*
-
-Ini rincian waktu email kamu, dicatat baik-baik yaa biar gak kelewatan:
-
-• 📬 *Alamat Email:* \`${user.activeEmail}\`
-• ⏳ *Sisa Masa Aktif:* \`${diffHours} Jam, ${diffMins} Menit, ${diffSecs} Detik\`
-• 💥 *Waktu Hancur Otomatis:* \`${waktuHancurTeks} WIB\`
-
-_💡 Tips Cantik: Selalu ketik /checkinbox secara berkala untuk memicu pembacaan kode OTP atau pesan masuk yang dikirim ke email di atas yaa! 💕_`;
+  const activeText = `📧 *Detail Sesi Email yang Sedang Aktif*\n\nRincian sesi email sementara kamu:\n\n• 📬 *Alamat Email:* \`${user.activeEmail}\`\n• ⏳ *Sisa Masa Aktif:* \`${diffHours} Jam, ${diffMins} Menit, ${diffSecs} Detik\`\n• 💥 *Waktu Hancur Otomatis:* \`${waktuHancurTeks} WIB\`\n\n_Tips: Ketik /checkinbox secara berkala untuk memeriksa pesan masuk atau kode OTP._`;
 
   try { await bot.sendMessage(chatId, activeText, { parse_mode: 'Markdown' }); } catch (err) {}
 });
@@ -281,34 +293,22 @@ bot.onText(/\/topuppoint/i, async (msg) => {
   const chatId = String(msg.chat.id).trim();
   await verifyUser(chatId, msg.from.first_name);
   
-  const priceText = `💳 *Store & Topup Center Resmi Emy* 💳
+  const priceText = `Store & Topup Center Resmi Emy
 
-Mau tambah poin atau upgrade akun biar makin powerful? Aku punya pilihan paket menarik dan hemat nih buat Kakak sayang:
+Daftar paket poin:
+- 10 Poin — Rp1.500
+- 50 Poin — Rp6.000
+- 100 Poin — Rp10.000
 
-💰 *[ 🎁 Pilihan Paket Poin Eceran ]*
-• 💎 *10 Poin* • Rp1.500
-• 💎 *50 Poin* • Rp6.000 *(Paling Hemat!)*
-• 💎 *100 Poin* • Rp10.000 *(Pilihan Best Seller!)*
+Tier:
+• B-Tier (Standard Free) — Harga: Rp0 — Masa Aktif Email: 3 Jam | Limit Kustom: 1x / Hari
+• A-Tier — Harga: Rp11.000 — Masa Aktif: 14 Hari — Limit: 10x Sesi / Hari
+• S-Tier — Harga: Rp15.000 — Masa Aktif: 30 Hari — Keuntungan: Unlimited Sesi
 
-👑 *[ 🔓 B-Tier ] Standard Free*
-• Harga: Rp0 (Gratis Selamanya)
-• Masa Aktif Email: 3 Jam | Limit Kustom: 1x / Hari
-
-👑 *[ ✨ A-Tier ] Aero Custom Mail*
-• Harga: *Rp11.000* (Masa Aktif 14 Hari)
-• Masa Aktif Email: 10 Jam Lumayan Lama!
-• Limit Buat: 10x Sesi / Hari
-• Keuntungan: Diskon Potongan Biaya Poin Sebesar 50%
-
-👑 *[ 🌌 S-Tier ] Infinite Eclipse*
-• Harga: *Rp15.000* (Masa Aktif 30 Hari Luar Biasa!)
-• Masa Aktif Email: 24 Jam Penuh Tanpa Mati!
-• Keuntungan: Unlimited Sesi & Bisa Bypass Pembuatan walau 0 Poin!
-
-📌 *Langkah Mudah Pembayaran:*
-1. Scan QRIS resmi Developer di atas yaa, Kak.
-2. Selesaikan pembayaran sesuai nominal paket yang Kakak pilih.
-3. Kirimkan foto bukti resi transfer sukses ke kontak Admin Telegram untuk proses pengisian koin/lisensi Kakak: [Hubungi Admin Terkasih](tg://user?id=${OWNER_ID})`;
+Langkah Pembayaran:
+1. Scan QRIS.
+2. Selesaikan pembayaran sesuai paket.
+3. Kirim bukti transfer ke Admin untuk proses pengisian koin/lisensi: [Hubungi Admin](tg://user?id=${OWNER_ID})`;
   
   try {
     await bot.sendPhoto(chatId, QRIS_URL, { caption: priceText, parse_mode: 'Markdown' });
@@ -325,14 +325,14 @@ bot.onText(/\/claimdaily/i, async (msg) => {
   const todayStr = getJakartaDateString();
 
   if (db.users[chatId].lastDailyClaim === todayStr) {
-    return bot.sendMessage(chatId, `⏰ *Eits, Jangan Serakah Dong Kakak Sayang..* 🤭\n\nKamu kan sudah mengambil jatah bonus hadiah gratis untuk hari ini. Balik lagi besok pagi yaa sayang untuk ambil bonus koin berikutnya. Aku bakal setia nungguin kamu kok! MUAACH~`, { parse_mode: 'Markdown' });
+    return bot.sendMessage(chatId, `⏰ *Perhatian*\n\nKamu sudah mengklaim hadiah gratis untuk hari ini. Silakan coba lagi besok untuk klaim berikutnya.`, { parse_mode: 'Markdown' });
   }
 
   db.users[chatId].points = (db.users[chatId].points || 0) + 10;
   db.users[chatId].lastDailyClaim = todayStr;
   await writeDB(db);
 
-  await bot.sendMessage(chatId, `🎁 *Horeee! Klaim Hadiah Berhasil!* 🎁\n\nSelamat yaa Kakak Cantik/Ganteng! Saldo dompet koin kamu berhasil ditambahkan sebesar *+10 Poin* secara gratis murni dari aku! Gunakan dengan bijak yaa sayang~ ✨`, { parse_mode: 'Markdown' });
+  await bot.sendMessage(chatId, `🎁 *Klaim Berhasil!* 🎁\n\nSaldo kamu berhasil ditambahkan sebesar *+10 Poin*. Gunakan dengan bijak.`, { parse_mode: 'Markdown' });
 });
 
 bot.onText(/\/help/i, async (msg) => {
@@ -341,22 +341,22 @@ bot.onText(/\/help/i, async (msg) => {
 
   const helpText = `🙋‍♀️ *Pusat Bantuan & Pengaduan Kendala Sesi*
 
-Halo Kakak sayang! Ada masalah atau kendala dengan sesi email atau akun premium kamu? Jangan panik atau marah-marah dulu yaa, aku bakal bantu selesaikan kok! 😊
+Halo! Ada masalah atau kendala dengan sesi email atau akun premium kamu? Silakan jelaskan masalahnya dan tim akan membantu menyelesaikannya.
 
 ⏰ *Sesi Email Tiba-tiba Hilang / Terhapus?*
-Bot kesayangan kamu ini berjalan di sistem otomatis *Cloud GitHub Engine*. Jika server pusat mengalami pemeliharaan (restart rutin), sesi email temporary yang sedang berjalan terpaksa diputus demi menjaga keamanan privasi.
-• Solusinya mudah banget, Kakak tinggal buat sesi email baru lagi yaa menggunakan perintah /createmailr atau /createmailc.
+Bot ini berjalan di sistem otomatis *Cloud GitHub Engine*. Jika server pusat mengalami pemeliharaan (restart rutin), sesi email temporary yang sedang berjalan dapat terputus demi menjaga keamanan privasi.
+• Solusi: buat sesi email baru menggunakan perintah /createmailr atau /createmailc.
 
 👑 *Masa Aktif Paket Premium Berkurang / Ke-reset?*
-Jika langganan Premium (A-Tier / S-Tier) Kakak mendadak hilang atau kembali jadi free akibat kendala pemeliharaan database server:
-1. Salin **ID Telegram** Kakak (Bisa disalin di menu /profile).
-2. Kirimkan nomor ID tersebut beserta detail kronologinya ke Email CS Support resmi kami.
-3. Tim teknis kami akan langsung memeriksa data log keuangan dan memulihkan sisa jatah hari premium Kakak secara utuh tanpa potongan!
+Jika langganan Premium (A-Tier / S-Tier) kamu mendadak hilang atau kembali menjadi free akibat pemeliharaan server/database:
+1. Salin **ID Telegram** kamu (dapat dilihat di menu /profile).
+2. Kirimkan ID tersebut beserta detail kronologi ke Email CS Support resmi kami.
+3. Tim teknis akan memeriksa log dan memulihkan sisa jatah hari premium kamu apabila diperlukan.
 
 Surat pengaduan resmi bisa langsung dilayangkan ke:
 • 📧 *Email CS Support:* \`${CS_EMAIL}\`
 
-_⚠️ Catatan Penting: Kontak chat Telegram Admin hanya dikhususkan untuk melayani jalur transaksi pembayaran deposit & top up saja ya Kak. Untuk komplain teknis/error wajib lewat jalur email di atas. Terima kasih atas pengertiannya yang baik, sayang! 💕_`;
+_⚠️ Catatan: Kontak chat Telegram Admin hanya dikhususkan untuk transaksi pembayaran (deposit & top up). Untuk komplain teknis/error, silakan gunakan jalur email CS Support di atas. Terima kasih atas pengertiannya._`;
 
   try {
     await bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown', disable_web_page_preview: true });
@@ -369,17 +369,17 @@ bot.onText(/\/aboutdev/i, async (msg) => {
 
   const aboutText = `👨‍💻 *Profil Manajemen Developer Bot*
 
-Sistem Mail Gateway yang cantik dan minimalis ini dirancang serta dioperasikan secara penuh mandiri untuk mencukupi kebutuhan temporary deployment email kamu sehari-hari.
+Sistem Mail Gateway yang sederhana dan minimalis ini dirancang serta dioperasikan secara mandiri untuk memenuhi kebutuhan deployment email sementara sehari-hari.
 
 • 👑 *Developer Utama:* \`Emy\`
 • 📧 *Email Hubungan CS Support:* \`${CS_EMAIL}\`
 
 ☕ *Donation & Dukungan Semangat*
-Kalau Kakak merasa bot buatan aku ini sangat bermanfaat dan membantu pekerjaan kamu, Kakak boleh banget loh memberikan dukungan donasi sukarela demi membantu biaya sewa server cloud biar bot ini tetep hidup dan nyala terus menemani kamu:
+Jika kamu merasa bot ini bermanfaat, kamu dapat memberikan dukungan donasi sukarela untuk membantu biaya operasional server:
 
 • 💝 *Link Saweria:* [Saweria Donasi Resmi Emy](${SAWERIA_URL})
 
-_⚠️ Catatan: Jika ditemukan kendala teknis atau error merugikan pada sistem, silakan layangkan laporan komplain kamu murni melalui Email CS Support di atas yaa Kakak. Terima kasih banyak atas dukungan tulusnya! 🥰_`;
+_⚠️ Catatan: Untuk kendala teknis atau error yang merugikan, silakan ajukan komplain melalui Email CS Support di atas. Terima kasih atas dukungan kamu._`;
   
   try {
     await bot.sendMessage(chatId, aboutText, { parse_mode: 'Markdown', disable_web_page_preview: true });
@@ -415,7 +415,7 @@ bot.onText(/\/(createmailc|createc)(?:\s+(.+))?/i, async (msg, match) => {
   const requestedName = match[2] ? match[2].trim().toLowerCase().replace(/[^a-z0-9.]/g, '') : '';
 
   if (!requestedName) {
-    return bot.sendMessage(chatId, `⚠️ *Aduh Kak, Formatnya Keliru..* 🤭\n\nHarap masukkan nama kustom yang kamu inginkan langsung di sebelah perintah yaa, cantik. Jangan dikosongin ih!\n\nContoh ketikan manis: \`/CreateMailC emyber\``, { parse_mode: 'Markdown' });
+    return bot.sendMessage(chatId, `⚠️ *Format Salah*\n\nHarap masukkan nama kustom yang diinginkan setelah perintah. Contoh: \`/CreateMailC emyber\``, { parse_mode: 'Markdown' });
   }
 
   customNameStorage.set(chatId, requestedName);
@@ -448,11 +448,11 @@ bot.onText(/\/checkinbox/i, async (msg) => {
     const res = await apiCall('https://api.mail.tm/messages', { headers: { 'Authorization': `Bearer ${user.activeEmailToken}` } });
     const messages = res.data['hydra:member'];
     if (messages.length === 0) {
-      return bot.sendMessage(chatId, `📭 *Inbox Masih Kosong Nih, Kak..*\n\nBelum ada surat atau kiriman kode OTP baru yang masuk ke \`${user.activeEmail}\`. Bersabar sebentar yaa sayang, coba minta pengirim untuk kirim ulang lalu ketik /checkinbox lagi! 💕`, { parse_mode: 'Markdown' });
+      return bot.sendMessage(chatId, `📭 *Inbox Kosong*\n\nBelum ada pesan atau kode OTP yang masuk ke \`${user.activeEmail}\`. Silakan minta pengirim untuk mengirim ulang dan coba /checkinbox lagi.`, { parse_mode: 'Markdown' });
     }
     const details = await apiCall(`https://api.mail.tm/messages/${messages[0].id}`, { headers: { 'Authorization': `Bearer ${user.activeEmailToken}` } });
     
-    const text = `📩 *Hore! Ada Pesan Masuk Baru untuk Kakak!* 📩
+    const text = `📩 *Pesan Masuk Baru* 📩
 
 • 👤 *Nama Pengirim:* ${details.data.from.name || 'Anonim'} <\`${details.data.from.address}\`>
 • 📑 *Subjek Surat:* *${details.data.subject || 'Tidak Ada Subjek'}*
@@ -477,13 +477,13 @@ ${(details.data.text || details.data.intro || '').substring(0, 3000)}
 bot.onText(/\/paneladmin/i, async (msg) => {
   const chatId = String(msg.chat.id).trim();
   if (chatId !== String(OWNER_ID)) {
-    return bot.sendMessage(chatId, `🔒 *Akses Ditolak Ketat!* 🤭\n\nIh, Kakak mau ngapain hayo? Menu rahasia dan sakral ini cuma bisa diakses oleh Owner/Developer Developer aja yaa! Kamu gak boleh masuk, wleee~`, { parse_mode: 'Markdown' });
+    return bot.sendMessage(chatId, `🔒 *Akses Ditolak*\n\nMenu ini hanya dapat diakses oleh Owner/Developer. Jika kamu merasa ini keliru, hubungi Admin.`, { parse_mode: 'Markdown' });
   }
   
   adminSessionStorage.delete(chatId); // Reset sisa sesi input admin
   const panelText = `👑 *Selamat Datang di Control Panel Rahasia Developer* 👑
 
-Halo Bos Emy Cantik! Silakan pilih tindakan manajemen database yang ingin kamu eksekusi hari ini secara praktis lewat tombol di bawah yaa:`;
+Halo Owner! Silakan pilih tindakan manajemen database yang ingin kamu eksekusi hari ini melalui tombol di bawah:`;
 
   try {
     await bot.sendMessage(chatId, panelText, {
@@ -504,3 +504,88 @@ bot.on('message', async (msg) => {
   const chatId = String(msg.chat.id).trim();
   if (chatId !== String(OWNER_ID)) return;
   if (
+    adminSessionStorage.has(chatId) &&
+    adminSessionStorage.get(chatId).step
+  ) {
+    // Handler admin interaktif belum lengkap; sementara ini hanya menahan input untuk Owner.
+    return;
+  }
+});
+
+// Owner-only: setpoint - set user's points to a specific value
+bot.onText(/\/setpoint(?:\s+(\d+)\s+(-?\d+))?/i, async (msg, match) => {
+  const chatId = String(msg.chat.id).trim();
+  const fromId = String(msg.from && msg.from.id).trim();
+  if (fromId !== String(OWNER_ID)) return bot.sendMessage(chatId, '🔒 Hanya Owner yang dapat menggunakan perintah ini.');
+
+  if (!match || !match[1] || typeof match[2] === 'undefined') {
+    return bot.sendMessage(chatId, 'Usage: /setpoint <userId> <points>');
+  }
+
+  const targetId = String(match[1]).trim();
+  const points = parseInt(match[2], 10);
+  if (Number.isNaN(points)) return bot.sendMessage(chatId, 'Nilai poin tidak valid.');
+
+  const db = await readDB();
+  if (!db.users[targetId]) {
+    db.users[targetId] = { name: 'Unknown', points: 0 };
+  }
+  const prevPoints = db.users[targetId].points || 0;
+  db.users[targetId].points = points;
+  await writeDB(db);
+  await appendAuditLog(fromId, 'setpoint', targetId, { points: prevPoints }, { points });
+  await bot.sendMessage(chatId, `✅ Poin untuk user ${targetId} telah diset menjadi ${points}.`);
+  try {
+    await bot.sendMessage(Number(targetId), `🔔 *Pemberitahuan Perubahan Poin*
+
+• Sebelumnya: *${prevPoints} poin*
+• Sekarang: *${points} poin*
+
+Perubahan ini dilakukan oleh Owner/Admin. Jika ada kesalahan, hubungi Admin segera.`, { parse_mode: 'Markdown' });
+  } catch (err) {
+    await bot.sendMessage(chatId, `⚠️ Gagal mengirim notifikasi ke user ${targetId}: ${err.message}`);
+  }
+});
+
+// Owner-only: settier - set user's tier (optionally with days of expiry)
+bot.onText(/\/settier(?:\s+(\d+)\s+(\S+)(?:\s+(\d+))?)?/i, async (msg, match) => {
+  const chatId = String(msg.chat.id).trim();
+  const fromId = String(msg.from && msg.from.id).trim();
+  if (fromId !== String(OWNER_ID)) return bot.sendMessage(chatId, '🔒 Hanya Owner yang dapat menggunakan perintah ini.');
+
+  if (!match || !match[1] || !match[2]) {
+    return bot.sendMessage(chatId, 'Usage: /settier <userId> <tierName> [days]');
+  }
+
+  const targetId = String(match[1]).trim();
+  const tierName = String(match[2]).trim();
+  const days = match[3] ? parseInt(match[3], 10) : null;
+
+  const db = await readDB();
+  if (!db.users[targetId]) {
+    db.users[targetId] = { name: 'Unknown', points: 0 };
+  }
+  const prevTier = db.users[targetId].tier || null;
+  const prevExpiry = db.users[targetId].tierExpiry || null;
+  db.users[targetId].tier = tierName;
+  if (days && !Number.isNaN(days)) {
+    const expiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    db.users[targetId].tierExpiry = expiry;
+  } else {
+    db.users[targetId].tierExpiry = null;
+  }
+  await writeDB(db);
+  await appendAuditLog(fromId, 'settier', targetId, { tier: prevTier, tierExpiry: prevExpiry }, { tier: tierName, tierExpiry: db.users[targetId].tierExpiry });
+  await bot.sendMessage(chatId, `✅ Tier untuk user ${targetId} telah diset menjadi ${tierName}${days ? ` (selama ${days} hari)` : ''}.`);
+  try {
+    const expiryText = db.users[targetId].tierExpiry ? `\n• Masa aktif: ${new Date(db.users[targetId].tierExpiry).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}` : '';
+    await bot.sendMessage(Number(targetId), `🔔 *Pemberitahuan Perubahan Tier*
+
+• Sebelumnya: *${prevTier || 'B-Tier (Standard Free)'}*
+• Sekarang: *${tierName}*${expiryText}
+
+Perubahan ini dilakukan oleh Owner/Admin. Jika ada kesalahan, hubungi Admin segera.`, { parse_mode: 'Markdown' });
+  } catch (err) {
+    await bot.sendMessage(chatId, `⚠️ Gagal mengirim notifikasi ke user ${targetId}: ${err.message}`);
+  }
+});
