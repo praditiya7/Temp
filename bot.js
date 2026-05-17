@@ -24,19 +24,18 @@ const adminSessionStorage = new Map(); // Untuk mencatat alur input menu rahasia
 
 // REGISTER MENU BLUE COMMANDS INTERFACE
 bot.setMyCommands([
-  { command: 'start', description: '🎀 Buka dashboard utama bot kamu' },
-  { command: 'profile', description: '👤 Cek saldo poin, tier & status email' },
-  { command: 'createmailr', description: '🎲 Buat email acak (Random)' },
-  { command: 'createmailc', description: '✍️ Buat email kustom nama kamu' },
-  { command: 'checkinbox', description: '📩 Periksa kotak masuk / kode OTP' },
-  { command: 'emailactive', description: '⏰ Cek sisa waktu sesi email kamu' },
-  { command: 'topuppoint', description: '💳 Topup poin & upgrade tier premium' },
-  { command: 'claimdaily', description: '🎁 Klaim bonus 10 poin harian kamu' },
-  { command: 'aboutdev', description: '👨‍💻 Informasi Developer & Link Dukungan' },
-  { command: 'help', description: '🙋‍♀️ Butuh bantuan? Sesi premium hilang?' },
-  { command: 'paneladmin', description: '👑 Menu Rahasia Developer (Owner Only)' }, // <-- MENU BARU!
-  { command: 'setpoint', description: '🔧 (Owner) Set poin user secara langsung' },
-  { command: 'settier', description: '🔧 (Owner) Set tier user secara langsung' }
+  { command: 'start', description: '📌 Buka dashboard utama' },
+  { command: 'profile', description: 'Cek saldo poin, tier & status email' },
+  { command: 'createmailr', description: 'Buat email acak' },
+  { command: 'createmailc', description: 'Buat email kustom' },
+  { command: 'checkinbox', description: 'Periksa kotak masuk / kode OTP' },
+  { command: 'emailactive', description: 'Cek sisa waktu sesi email' },
+  { command: 'topuppoint', description: 'Topup poin & upgrade tier' },
+  { command: 'claimdaily', description: 'Klaim bonus harian' },
+  { command: 'aboutdev', description: 'Info developer & dukungan' },
+  { command: 'help', description: 'Pusat bantuan' },
+  { command: 'setpoint', description: '(Owner) Set poin user' },
+  { command: 'settier', description: '(Owner) Set tier user' }
 ]).catch((err) => console.error("Gagal melakukan set perintah menu:", err.message));
 
 // ANTI-SPAM RATE LIMITER
@@ -187,26 +186,27 @@ async function apiCall(url, options = {}, retries = 3) {
 // -------------------------------------------------------------
 bot.onText(/\/(start|menu)/i, async (msg) => {
   const chatId = String(msg.chat.id).trim();
-  if (!checkRateLimit(chatId)) return bot.sendMessage(chatId, "⏳ Sistem sedang sibuk — silakan tunggu 5 detik lalu coba lagi.");
+  if (!checkRateLimit(chatId)) return bot.sendMessage(chatId, "Sistem sedang sibuk, silakan tunggu beberapa detik lalu coba lagi.");
 
   await verifyUser(chatId, msg.from.first_name);
-  
-  const text = `🎀 *Halo — Selamat Datang di Dashboard Utama* 🎀
+  const userName = msg.from.username ? `@${msg.from.username}` : (msg.from.first_name || 'Pengguna');
+
+  const text = `📌 Halo ${userName}, selamat datang di dashboard utama.
 
 Bot ini siap membantu kamu menyiapkan email sementara yang aman, cepat, dan terpercaya. Berikut fitur yang tersedia:
 
-*✨ Fitur Pembuatan Email Sementara*
-🎲 /CreateMailR • Buat sesi email acak (Random)
-✍️ /CreateMailC • Buat sesi email kustom
-📥 /CheckInbox • Periksa kotak masuk / kode OTP
-⏰ /EmailActive • Lihat sisa waktu sesi email aktif
+Fitur pembuatan email sementara:
+- /CreateMailR • Buat sesi email acak
+- /CreateMailC • Buat sesi email kustom
+- /CheckInbox • Periksa kotak masuk / kode OTP
+- /EmailActive • Lihat sisa waktu sesi email aktif
 
-*👑 Menu Akun & Layanan Premium*
-👤 /Profile • Cek saldo poin & level tier
-💳 /TopupPoint • Topup poin & upgrade premium
-🎁 /ClaimDaily • Klaim bonus 10 poin harian
-🙋‍♀️ /Help • Pusat bantuan
-👨‍💻 /AboutDev • Informasi developer
+Menu akun & layanan premium:
+- /Profile • Cek saldo poin & level tier
+- /TopupPoint • Topup poin & upgrade tier
+- /ClaimDaily • Klaim bonus harian
+- /Help • Pusat bantuan
+- /AboutDev • Info developer
 
 Gunakan perintah di atas sesuai kebutuhan.`;
 
@@ -468,49 +468,6 @@ ${(details.data.text || details.data.intro || '').substring(0, 3000)}
   }
 });
 
-
-// =============================================================
-// NEW: PRIVILEGED INTERACTIVE ADMIN PANEL (MENU KEDUA KHUSUS OWNER)
-// =============================================================
-
-// Handler Membuka Panel Utama Admin via Command
-bot.onText(/\/paneladmin/i, async (msg) => {
-  const chatId = String(msg.chat.id).trim();
-  if (chatId !== String(OWNER_ID)) {
-    return bot.sendMessage(chatId, `🔒 *Akses Ditolak*\n\nMenu ini hanya dapat diakses oleh Owner/Developer. Jika kamu merasa ini keliru, hubungi Admin.`, { parse_mode: 'Markdown' });
-  }
-  
-  adminSessionStorage.delete(chatId); // Reset sisa sesi input admin
-  const panelText = `👑 *Selamat Datang di Control Panel Rahasia Developer* 👑
-
-Halo Owner! Silakan pilih tindakan manajemen database yang ingin kamu eksekusi hari ini melalui tombol di bawah:`;
-
-  try {
-    await bot.sendMessage(chatId, panelText, {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '💰 Pengisian / Tambah Poin User', callback_data: 'adm_trigger_point' }],
-          [{ text: '👑 Upgrade / Restore Hari Tier Premium', callback_data: 'adm_trigger_tier' }],
-          [{ text: '❌ Tutup Menu Panel', callback_data: 'adm_close_panel' }]
-        ]
-      }
-    });
-  } catch (err) {}
-});
-
-// Listener Membaca Alur Percakapan Teks Bebas khusus Penginputan Admin Panel
-bot.on('message', async (msg) => {
-  const chatId = String(msg.chat.id).trim();
-  if (chatId !== String(OWNER_ID)) return;
-  if (
-    adminSessionStorage.has(chatId) &&
-    adminSessionStorage.get(chatId).step
-  ) {
-    // Handler admin interaktif belum lengkap; sementara ini hanya menahan input untuk Owner.
-    return;
-  }
-});
 
 // Owner-only: setpoint - set user's points to a specific value
 bot.onText(/\/setpoint(?:\s+(\d+)\s+(-?\d+))?/i, async (msg, match) => {
