@@ -1,5 +1,5 @@
 // =============================================================
-// TELEGRAM MAIL GATEWAY CORE ENGINE v17.4 - TIKTOK UI & ENGINE FIXED
+// TELEGRAM MAIL GATEWAY CORE ENGINE v17.5 - ABOUTDEV & QRIS FIXED
 // =============================================================
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
@@ -12,13 +12,13 @@ const TOKEN = process.env.TOKEN || '8829940673:AAHqA6_LjlON9DXqMfUTkZ68__MC1O8ZR
 const OWNER_ID = process.env.OWNER_ID || '8430290683';
 const TIKTOK_DEV_URL = process.env.TIKTOK_URL || 'https://www.tiktok.com/@emyjbl_';
 const QRIS_URL = process.env.QRIS_URL || 'https://qu.ax/g1eRh';
+const SAWERIA_URL = process.env.SAWERIA_URL || 'https://saweria.co/emyber'; // Ganti via .env jika perlu
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 const dbPath = path.join(__dirname, 'database.json');
 
 // STORAGE OPTIMIZED WITH MAPS
 const customNameStorage = new Map();
-const missionStorage = new Map();
 const rateLimitStorage = new Map();
 
 // REGISTER MENU BLUE COMMANDS INTERFACE
@@ -31,8 +31,8 @@ bot.setMyCommands([
   { command: 'emailactive', description: 'Cek detail email aktif & sisa waktu' },
   { command: 'sendmail', description: 'Kirim email keluar (Developer Only)' },
   { command: 'topuppoint', description: 'Topup poin & upgrade tier premium' },
-  { command: 'misitiktok', description: 'Ambil bonus poin gratis' },
-  { command: 'claimdaily', description: 'Klaim bonus 10 poin harian' }
+  { command: 'claimdaily', description: 'Klaim bonus 10 poin harian' },
+  { command: 'aboutdev', description: 'Informasi Developer & Link Dukungan' }
 ]).catch((err) => console.error("Gagal melakukan set perintah menu:", err.message));
 
 // ANTI-SPAM RATE LIMITER
@@ -85,7 +85,6 @@ async function verifyUser(chatId, firstName) {
       activeEmail: null,
       activeEmailToken: null,
       emailExpiry: null,
-      tiktokClaimed: false,
       tier: 'B-Tier (Standard Free)',
       tierExpiry: null,
       dailyUsageCustom: 0,
@@ -157,7 +156,7 @@ bot.onText(/\/(start|menu)/i, async (msg) => {
   if (!checkRateLimit(chatId)) return bot.sendMessage(chatId, "⏳ Terlalu cepat! Beri jeda beberapa detik.");
 
   await verifyUser(chatId, msg.from.first_name);
-  const text = `⚙️ *PANDUAN UTAMA KENDALI BOT*\n──────────────────────────────\n🎲 /CreateMailR \`───\` Pasang Email Temp Acak\n✍️ /CreateMailC \`───\` Pasang Email Temp Kustom\n📥 /CheckInbox \`────\` Tarik Pesan Masuk / OTP\n📧 /EmailActive \`───\` Cek Sisa Waktu Sesi Email\n✉️ /SendMail \`──────\` Kirim Email Keluar Anonim\n\n💳 *SISTEM AKUN & TOPUP POIN*\n──────────────────────────────\n👤 /Profile \`────────\` Cek Saldo, Tier & Limit\n💵 /TopupPoint \`─────\` Isi Poin & Order Premium\n🎁 /MisiTiktok \`─────\` Misi Follow Dev (*+10 Poin*)\n📅 /ClaimDaily \`─────\` Klaim Jatah Poin Harian (*+10*)\n──────────────────────────────\n_Klik salah satu perintah berwarna biru di atas untuk mengoperasikan fitur bot secara instan._`;
+  const text = `⚙️ *PANDUAN UTAMA KENDALI BOT*\n──────────────────────────────\n🎲 /CreateMailR \`───\` Pasang Email Temp Acak\n✍️ /CreateMailC \`───\` Pasang Email Temp Kustom\n📥 /CheckInbox \`────\` Tarik Pesan Masuk / OTP\n📧 /EmailActive \`───\` Cek Sisa Waktu Sesi Email\n✉️ /SendMail \`──────\` Kirim Email Keluar Anonim\n\n💳 *SISTEM AKUN & TOPUP POIN*\n──────────────────────────────\n👤 /Profile \`────────\` Cek Saldo, Tier & Limit\n💵 /TopupPoint \`─────\` Isi Poin & Order Premium\n📅 /ClaimDaily \`─────\` Klaim Jatah Poin Harian (*+10*)\n👨‍💻 /AboutDev \`──────\` Info Dev & Link Dukungan\n──────────────────────────────\n_Klik salah satu perintah berwarna biru di atas untuk mengoperasikan fitur bot secara instan._`;
   try { await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' }); } catch (err) {}
 });
 
@@ -217,15 +216,18 @@ bot.onText(/\/emailactive/i, async (msg) => {
   try { await bot.sendMessage(chatId, activeText, { parse_mode: 'Markdown' }); } catch (err) {}
 });
 
+// FIXED: MENAMPILKAN IMAGE QRIS DAN DESKRIPSI LENGKAP HARGA
 bot.onText(/\/topuppoint/i, async (msg) => {
   const chatId = String(msg.chat.id).trim();
   await verifyUser(chatId, msg.from.first_name);
-  const priceText = `...`; // (Teks dipersingkat di log konsol biar ga corrupt)
-  const fullPriceText = `💳 *LIST TOPUP POIN & TIER PREMIUM*\n──────────────────────────────\n👑 *[ B-Tier ] - Standard Free (Default)*\n ├─ Harga : Rp0\n ├─ Masa Aktif Email : *3 Jam*\n └─ Limit Custom : *1x / Hari*\n\n👑 *[ A-Tier ] - Aero Custom Mail*\n ├─ Harga : *Rp11.000* (Aktif 14 Hari)\n ├─ Masa Aktif Email : *10 Jam*\n ├─ Total Limit Buat : *10x / Hari*\n └─ *DISKON POTONGAN POIN 50%*\n\n👑 *[ S-Tier ] - Infinite Eclipse*\n ├─ Harga : *Rp15.000* (Aktif 30 Hari)\n ├─ Masa Aktif Email : *24 Jam Penuh*\n └─ *UNLIMITED & BYPASS 0 POIN*\n──────────────────────────────\n📌 *PROSEDUR PEMBAYARAN:*\n1. Scan kode QRIS resmi developer di atas.\n2. Kirim bukti resi transfer sukses ke kontak Admin Owner: [Klik Hubungi Admin](tg://user?id=${OWNER_ID}) untuk aktivasi instan.`;
+  
+  const priceText = `💳 *LIST TOPUP POIN & TIER PREMIUM*\n──────────────────────────────\n👑 *[ B-Tier ] - Standard Free (Default)*\n ├─ Harga : Rp0\n ├─ Masa Aktif Email : *3 Jam*\n └─ Limit Custom : *1x / Hari* (Acak Bebas)\n\n👑 *[ A-Tier ] - Aero Custom Mail*\n ├─ Harga : *Rp11.000* (Aktif 14 Hari)\n ├─ Masa Aktif Email : *10 Jam*\n ├─ Total Limit Buat : *10x / Hari*\n └─ *DISKON POTONGAN POIN 50%*\n\n👑 *[ S-Tier ] - Infinite Eclipse*\n ├─ Harga : *Rp15.000* (Aktif 30 Hari)\n ├─ Masa Aktif Email : *24 Jam Penuh*\n └─ *UNLIMITED & BYPASS 0 POIN (GRATIS SEPUASNYA)*\n──────────────────────────────\n📌 *PROSEDUR PEMBAYARAN:*\n1. Scan atau simpan kode QRIS resmi di atas.\n2. Lakukan transfer nominal sesuai paket pilihan Anda.\n3. Kirimkan bukti resi transfer sukses Anda ke kontak Admin/Owner untuk proses aktivasi instant: [Hubungi Admin](tg://user?id=${OWNER_ID})`;
+  
   try {
-    await bot.sendPhoto(chatId, QRIS_URL, { caption: fullPriceText, parse_mode: 'Markdown' });
-  } catch {
-    await bot.sendMessage(chatId, fullPriceText + `\n\n⚠️ _(Gagal memuat gambar QRIS)_`, { parse_mode: 'Markdown' });
+    await bot.sendPhoto(chatId, QRIS_URL, { caption: priceText, parse_mode: 'Markdown' });
+  } catch (err) {
+    console.error("Gagal mengirim QRIS image:", err.message);
+    await bot.sendMessage(chatId, priceText + `\n\n⚠️ _(Sistem gagal memuat gambar QRIS secara langsung, pastikan tautan QRIS_URL valid)_`, { parse_mode: 'Markdown' });
   }
 });
 
@@ -238,20 +240,18 @@ bot.onText(/\/claimdaily/i, async (msg) => {
   await bot.sendMessage(chatId, `🎁 *DAILY BONUS CLAIMED*\n\nSelamat! Rekening saldo Anda berhasil ditambahkan *+10 Poin* gratis harian.`);
 });
 
-bot.onText(/\/misitiktok/i, async (msg) => {
+// NEW FEATURE: /aboutdev MENU WITH BIOGRAPHY AND DONATION LINK
+bot.onText(/\/aboutdev/i, async (msg) => {
   const chatId = String(msg.chat.id).trim();
-  const user = await verifyUser(chatId, msg.from.first_name);
-  if (user.tiktokClaimed) {
-    return bot.sendMessage(chatId, `❌ *MISSION COMPLETED*\n\nAnda sudah menuntaskan jatah hadiah misi ini sebelumnya.`, { parse_mode: 'Markdown' });
-  }
-  const tiktokText = `🎁 *MISI GRATIS BONUS POIN DEVS*\n──────────────────────────────\nDapatkan bonus reward instan sebesar *+10 Poin* langsung masuk dompet saldo Anda:\n\n1. Kunjungi tautan akun Dev: ${TIKTOK_DEV_URL}\n2. Klik tombol *Follow / Ikuti* akun resmi kami.\n3. Jika sudah selesai, kembali ke bot ini dan klik tombol konfirmasi di bawah ini:\n──────────────────────────────`;
+  await verifyUser(chatId, msg.from.first_name);
+
+  const aboutText = `👨‍💻 *DEVELOPER PROFILE & CREDENTIALS*\n──────────────────────────────\nBot Gateway ini dirancang, dikembangkan, dan dikelola sepenuhnya secara independen.\n\n👤 *Nama Developer :* \`Emy\`\n🎵 *TikTok Official :* [emyjbl_](${TIKTOK_DEV_URL})\n💬 *Telegram Support :* [Klik Hubungi Developer](tg://user?id=${OWNER_ID})\n──────────────────────────────\n☕ *LINK DUKUNGAN / DONASI COFFEE*\nJika bot ini dirasa bermanfaat membantu aktivitas harian Anda, pertimbangkan untuk memberikan donasi sukarela guna pemeliharaan kestabilan server cloud kami:\n\n🔗 *Dukungan Saweria :* [Saweria Donasi Resmi Emy](${SAWERIA_URL})\n──────────────────────────────\n_Terima kasih banyak atas segala bentuk dukungan dan apresiasi Anda!_`;
+  
   try {
-    await bot.sendMessage(chatId, tiktokText, {
-      parse_mode: 'Markdown',
-      disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: [[{ text: '✅ Confirm To Developer', callback_data: 'tiktok_confirm' }]] }
-    });
-  } catch (err) {}
+    await bot.sendMessage(chatId, aboutText, { parse_mode: 'Markdown', disable_web_page_preview: false });
+  } catch (err) {
+    console.error("Gagal mengirim menu aboutdev:", err.message);
+  }
 });
 
 bot.onText(/\/(createmailr|creater)/i, async (msg) => {
@@ -366,13 +366,6 @@ bot.on('callback_query', async (query) => {
   const isAdmin = chatId === String(OWNER_ID);
   const user = db.users[chatId] || await verifyUser(chatId, query.from.first_name);
 
-  // === FIXED CRITICAL: SEKARANG TOMBOL TIKTOK BERREAKSI DAN MEMINTA INPUT ===
-  if (data === 'tiktok_confirm') {
-    await bot.deleteMessage(chatId, query.message.message_id).catch(() => {});
-    missionStorage.set(chatId, 'awaiting_tiktok_username');
-    return bot.sendMessage(chatId, `✍️ *VERIFIKASI SISTEM TIKTOK*\n\nSilakan ketik langsung dan kirimkan **Username TikTok** Anda yang digunakan untuk mem-follow kami (Contoh: \`@emyber\`):`);
-  }
-
   if (data === 'run_mail_random' || data === 'run_mail_custom') {
     await bot.deleteMessage(chatId, query.message.message_id).catch(() => {});
     let cost = data === 'run_mail_custom' ? 10 : 5;
@@ -430,39 +423,8 @@ bot.on('callback_query', async (query) => {
   }
 });
 
-// -------------------------------------------------------------
-// TEXT CONTENT INTERCEPT LISTENER
-// -------------------------------------------------------------
-bot.on('message', async (msg) => {
-  const chatId = String(msg.chat.id).trim();
-  if (!msg.text || msg.text.startsWith('/')) return;
-  
-  if (missionStorage.get(chatId) === 'awaiting_tiktok_username') {
-    const tkUser = msg.text.trim();
-    missionStorage.delete(chatId);
-    
-    const db = await readDB();
-    await verifyUser(chatId, msg.from.first_name);
-    
-    if (db.users[chatId].tiktokClaimed) {
-      return bot.sendMessage(chatId, `❌ Hadiah misi ini sudah diambil.`);
-    }
-
-    // Eksekusi Poin Masuk Instan (Auto Approve)
-    db.users[chatId].points = (db.users[chatId].points || 0) + 10;
-    db.users[chatId].tiktokClaimed = true;
-    await writeDB(db);
-    
-    await bot.sendMessage(chatId, `🎉 *MISI BERHASIL VERIFIKASI*\n\nSistem berhasil mendeteksi akun TikTok "${tkUser}". Saldo dompet Anda sukses ditambahkan sebesar *+10 Poin* gratis!`, { parse_mode: 'Markdown' });
-    
-    try {
-      await bot.sendMessage(OWNER_ID, `📢 *LOG NOTIFIKASI MISI TIKTOK*\n\n• User ID : ${chatId}\n• Nama Akun : ${msg.from.first_name || 'User'}\n• Bukti TikTok : ${tkUser}\n\n_Status: Auto-Approved oleh sistem Gateway_`);
-    } catch (err) {}
-  }
-});
-
 // CRASH SHIELD LAYER
 process.on('uncaughtException', (err) => { console.error('CRITICAL UNCAUGHT EXCEPTION:', err.message); });
 process.on('unhandledRejection', (reason, promise) => { console.error('Unhandled Rejection at:', promise, 'reason:', reason); });
 
-console.log(`=================================================\n    CORE SYSTEM v17.4 TIKTOK FIX COMPLETE ACTIVE\n=================================================`);
+console.log(`=================================================\n    CORE SYSTEM v17.5 IS RUNNING\n=================================================`);
