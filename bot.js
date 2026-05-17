@@ -32,11 +32,12 @@ bot.setMyCommands([
   { command: 'emailactive', description: 'Cek sisa waktu sesi email' },
   { command: 'topuppoint', description: 'Topup poin & upgrade tier' },
   { command: 'claimdaily', description: 'Klaim bonus harian' },
+  { command: 'sendsubscribe', description: 'Beli langganan anon chat sendmessage' },
   { command: 'aboutdev', description: 'Info developer & dukungan' },
   { command: 'help', description: 'Pusat bantuan' },
   { command: 'setpoint', description: '(Owner) Atur poin user' },
   { command: 'settier', description: '(Owner) Atur tier user' },
-  { command: 'sendmessage', description: '(Owner) Kirim pesan ke user ID' }
+  { command: 'sendmessage', description: 'Kirim pesan anon ke user ID/username' }
 ]).catch((err) => console.error("Gagal melakukan set perintah menu:", err.message));
 
 // ANTI-SPAM RATE LIMITER
@@ -101,14 +102,17 @@ async function appendAuditLog(operatorId, action, targetId, before, after) {
   }
 }
 
-async function verifyUser(chatId, firstName) {
+async function verifyUser(chatId, firstName, username) {
   const db = await readDB();
   const today = getJakartaDateString();
   chatId = String(chatId).trim();
 
+  const normalizedUsername = username ? String(username).toLowerCase() : null;
+
   if (!db.users[chatId]) {
     db.users[chatId] = {
       name: firstName || 'Pengguna',
+      username: normalizedUsername,
       points: 10,
       activeEmail: null,
       activeEmailToken: null,
@@ -118,8 +122,19 @@ async function verifyUser(chatId, firstName) {
       dailyUsageCustom: 0,
       dailyUsageRandom: 0,
       lastUsedDate: today,
-      lastDailyClaim: null
+      lastDailyClaim: null,
+      sendMessageQuota: 0
     };
+    await writeDB(db);
+  }
+
+  if (normalizedUsername && db.users[chatId].username !== normalizedUsername) {
+    db.users[chatId].username = normalizedUsername;
+    await writeDB(db);
+  }
+
+  if (typeof db.users[chatId].sendMessageQuota === 'undefined') {
+    db.users[chatId].sendMessageQuota = 0;
     await writeDB(db);
   }
 
@@ -166,6 +181,112 @@ function makeRandomString(length) {
   return result;
 }
 
+function sanitizeMailName(name) {
+  return String(name || '').trim().toLowerCase().replace(/[^a-z0-9.]/g, '');
+}
+
+async function getMailTmDomain() {
+  const res = await apiCall('https://api.mail.tm/domains');
+  const domains = res.data && res.data['hydra:member'];
+  if (!Array.isArray(domains) || domains.length === 0) {
+    throw new Error('Tidak ada domain mail.tm yang tersedia saat ini.');
+  }
+  return domains[0].domain;
+}
+
+async function createMailTmAccount(emailAddress) {
+  const password = makeRandomString(16);
+  await apiCall('https://api.mail.tm/accounts', {
+    method: 'post',
+    headers: { 'Content-Type': 'application/json' },
+    data: { address: emailAddress, password }
+  });
+
+  const tokenRes = await apiCall('https://api.mail.tm/token', {
+    method: 'post',
+    headers: { 'Content-Type': 'application/json' },
+    data: { address: emailAddress, password }
+  });
+
+  return { address: emailAddress, token: tokenRes.data.token };
+}
+
+async function createTemporaryEmailSession(chatId, type) {
+  const db = await readDB();
+  const user = db.users[chatId];
+  if (!user) throw new Error('User not registered.');
+  const isAdmin = chatId === String(OWNER_ID);
+  const now = Date.now();
+
+  if (user.activeEmail && user.emailExpiry && now < new Date(user.emailExpiry).getTime()) {
+    throw new Error('Kamu sudah memiliki sesi email yang aktif. Silakan tunggu hingga sesi berakhir sebelum membuat yang baru.');
+  }
+
+  let cost;
+  let requestedName = null;
+  if (type === 'random') {
+    cost = user.tier.includes('A-Tier') ? 2 : (user.tier.includes('S-Tier') || isAdmin ? 0 : 5);
+  } else {
+    requestedName = customNameStorage.get(chatId);
+    if (!requestedName) {
+      throw new Error('Nama custom tidak ditemukan. Silakan jalankan kembali /createmailc dengan nama yang diinginkan.');
+    }
+    cost = user.tier.includes('A-Tier') ? 5 : (user.tier.includes('S-Tier') || isAdmin ? 0 : 10);
+  }
+
+  if (!isAdmin && user.points < cost) {
+    throw new Error('Saldo poin tidak cukup untuk membuat sesi email ini. Silakan topup poin terlebih dahulu.');
+  }
+
+  const domain = await getMailTmDomain();
+  let attempt = 0;
+  let emailAddress;
+  let success = false;
+
+  while (!success && attempt < 5) {
+    attempt += 1;
+    if (type === 'random') {
+      emailAddress = `${makeRandomString(10)}@${domain}`;
+    } else {
+      emailAddress = `${sanitizeMailName(requestedName)}@${domain}`;
+    }
+
+    try {
+      const { address, token } = await createMailTmAccount(emailAddress);
+      user.activeEmail = address;
+      user.activeEmailToken = token;
+      user.emailExpiry = new Date(now + 60 * 60 * 1000).toISOString();
+
+      if (!isAdmin) {
+        user.points -= cost;
+        if (type === 'random') {
+          user.dailyUsageRandom = (user.dailyUsageRandom || 0) + 1;
+        } else {
+          user.dailyUsageCustom = (user.dailyUsageCustom || 0) + 1;
+        }
+      }
+
+      await writeDB(db);
+      success = true;
+      return {
+        address,
+        cost,
+        expiryText: new Date(user.emailExpiry).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })
+      };
+    } catch (err) {
+      if (err.response && err.response.status === 422 && type === 'random') {
+        continue;
+      }
+      if (err.response && err.response.status === 422 && type === 'custom') {
+        throw new Error('Nama email custom sudah dipakai. Silakan pilih nama lain.');
+      }
+      throw err;
+    }
+  }
+
+  throw new Error('Gagal membuat alamat email otomatis. Silakan coba lagi nanti.');
+}
+
 async function apiCall(url, options = {}, retries = 3) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -189,7 +310,7 @@ bot.onText(/\/(start|menu)/i, async (msg) => {
   const chatId = String(msg.chat.id).trim();
   if (!checkRateLimit(chatId)) return bot.sendMessage(chatId, "Sistem sedang sibuk, silakan tunggu beberapa detik lalu coba lagi.");
 
-  await verifyUser(chatId, msg.from.first_name);
+  await verifyUser(chatId, msg.from.first_name, msg.from.username);
   const userName = msg.from.username ? `@${msg.from.username}` : (msg.from.first_name || 'Pengguna');
 
   const text = `Halo ${userName}, selamat datang di dashboard utama.
@@ -218,7 +339,7 @@ bot.onText(/\/profile/i, async (msg) => {
   const chatId = String(msg.chat.id).trim();
   if (!checkRateLimit(chatId, 'profile')) return;
 
-  const user = await verifyUser(chatId, msg.from.first_name);
+  const user = await verifyUser(chatId, msg.from.first_name, msg.from.username);
   const isAdmin = chatId === String(OWNER_ID);
 
   let customLimitText = (user.dailyUsageCustom || 0) + ' / 1 Sesi Hari Ini';
@@ -245,6 +366,7 @@ bot.onText(/\/profile/i, async (msg) => {
     }
   }
 
+  const subscriptionText = user.sendMessageQuota > 0 ? `\`${user.sendMessageQuota} pesan tersisa\`` : '_Belum berlangganan anon chat_';
   const profileText = `Profil akun kamu:
 
 Halo *${user.name}*, berikut detail akun kamu di sistem:
@@ -252,6 +374,7 @@ Halo *${user.name}*, berikut detail akun kamu di sistem:
 - ID Telegram: \`${chatId}\`
 - Saldo poin: *${isAdmin ? 'Bypass (Owner)' : `${user.points} Points`}*
 - Level tier: \`${isAdmin ? 'S-Tier (Owner)' : user.tier}\`${expInfo}
+- Langganan Anon Chat: ${subscriptionText}
 
 Sisa kuota pembuatan hari ini:
 - Email Kustom: \`${customLimitText}\`
@@ -265,7 +388,7 @@ Status sesi aktif saat ini:
 
 bot.onText(/\/emailactive/i, async (msg) => {
   const chatId = String(msg.chat.id).trim();
-  const user = await verifyUser(chatId, msg.from.first_name);
+  const user = await verifyUser(chatId, msg.from.first_name, msg.from.username);
 
   if (!user.activeEmail || !user.emailExpiry) {
     return bot.sendMessage(chatId, `*Sesi Tidak Ditemukan*\n\nSaat ini kamu tidak memiliki sesi email temporary yang aktif. Silakan buat sesi baru menggunakan /createmailr atau /createmailc.`, { parse_mode: 'Markdown' });
@@ -292,7 +415,7 @@ bot.onText(/\/emailactive/i, async (msg) => {
 
 bot.onText(/\/topuppoint/i, async (msg) => {
   const chatId = String(msg.chat.id).trim();
-  await verifyUser(chatId, msg.from.first_name);
+  await verifyUser(chatId, msg.from.first_name, msg.from.username);
   
   const priceText = `Store & Topup Center Resmi Emy
 
@@ -306,6 +429,9 @@ Tier:
 • A-Tier — Harga: Rp11.000 — Masa Aktif: 14 Hari — Limit: 10x Sesi / Hari
 • S-Tier — Harga: Rp15.000 — Masa Aktif: 30 Hari — Keuntungan: Unlimited Sesi
 
+Langganan Anon Chat:
+• SendMessage Anon — Harga: Rp7.000 untuk 10 pesan
+
 Langkah Pembayaran:
 1. Scan QRIS.
 2. Selesaikan pembayaran sesuai paket.
@@ -318,10 +444,23 @@ Langkah Pembayaran:
   }
 });
 
+bot.onText(/\/sendsubscribe/i, async (msg) => {
+  const chatId = String(msg.chat.id).trim();
+  await verifyUser(chatId, msg.from.first_name, msg.from.username);
+
+  const subscribeText = `Langganan Anon Chat SendMessage:\n\n• Paket: 10 pesan anonim\n• Harga: Rp7.000\n\nCara beli:\n1. Scan QRIS di bawah ini.\n2. Bayar Rp7.000.\n3. Kirim bukti pembayaran ke Admin: [Hubungi Admin](tg://user?id=${OWNER_ID})\n\nSetelah admin konfirmasi, kuota kamu akan ditambahkan.\nGunakan /sendmessage <userId|@username> <pesan> untuk mengirim pesan anonim.`;
+
+  try {
+    await bot.sendPhoto(chatId, QRIS_URL, { caption: subscribeText, parse_mode: 'Markdown', disable_web_page_preview: true });
+  } catch (err) {
+    await bot.sendMessage(chatId, subscribeText, { parse_mode: 'Markdown', disable_web_page_preview: true });
+  }
+});
+
 bot.onText(/\/claimdaily/i, async (msg) => {
   const chatId = String(msg.chat.id).trim();
   const db = await readDB();
-  await verifyUser(chatId, msg.from.first_name);
+  await verifyUser(chatId, msg.from.first_name, msg.from.username);
   
   const todayStr = getJakartaDateString();
 
@@ -338,7 +477,7 @@ bot.onText(/\/claimdaily/i, async (msg) => {
 
 bot.onText(/\/help/i, async (msg) => {
   const chatId = String(msg.chat.id).trim();
-  await verifyUser(chatId, msg.from.first_name);
+  await verifyUser(chatId, msg.from.first_name, msg.from.username);
 
   const helpText = `Pusat bantuan dan pengaduan kendala sesi:
 
@@ -366,7 +505,7 @@ _Catatan: Kontak Telegram Admin hanya untuk transaksi pembayaran. Untuk komplain
 
 bot.onText(/\/aboutdev/i, async (msg) => {
   const chatId = String(msg.chat.id).trim();
-  await verifyUser(chatId, msg.from.first_name);
+  await verifyUser(chatId, msg.from.first_name, msg.from.username);
 
   const aboutText = `Profil developer bot:
 
@@ -389,7 +528,7 @@ _Catatan: Untuk kendala teknis atau error, gunakan email CS Support di atas._`;
 
 bot.onText(/\/(createmailr|creater)/i, async (msg) => {
   const chatId = String(msg.chat.id).trim();
-  const user = await verifyUser(chatId, msg.from.first_name);
+  const user = await verifyUser(chatId, msg.from.first_name, msg.from.username);
   const isAdmin = chatId === String(OWNER_ID);
   customNameStorage.delete(chatId);
   let cost = user.tier.includes('A-Tier') ? 2 : (user.tier.includes('S-Tier') || isAdmin ? 0 : 5);
@@ -411,9 +550,9 @@ Silakan konfirmasi pembuatan email acak otomatis dengan menekan tombol di bawah 
 
 bot.onText(/\/(createmailc|createc)(?:\s+(.+))?/i, async (msg, match) => {
   const chatId = String(msg.chat.id).trim();
-  const user = await verifyUser(chatId, msg.from.first_name);
+  const user = await verifyUser(chatId, msg.from.first_name, msg.from.username);
   const isAdmin = chatId === String(OWNER_ID);
-  const requestedName = match[2] ? match[2].trim().toLowerCase().replace(/[^a-z0-9.]/g, '') : '';
+  const requestedName = match[2] ? sanitizeMailName(match[2]) : '';
 
   if (!requestedName) {
     return bot.sendMessage(chatId, `*Format salah*\n\nHarap masukkan nama kustom yang diinginkan setelah perintah. Contoh: \`/CreateMailC emyber\``, { parse_mode: 'Markdown' });
@@ -422,12 +561,7 @@ bot.onText(/\/(createmailc|createc)(?:\s+(.+))?/i, async (msg, match) => {
   customNameStorage.set(chatId, requestedName);
   let cost = user.tier.includes('A-Tier') ? 5 : (user.tier.includes('S-Tier') || isAdmin ? 0 : 10);
   
-  const inlineText = `Deploy system custom email:
-
-- Pilihan nama: \`${requestedName}\`
-- Biaya pemotongan: \`${cost} Poin\`
-
-Silakan konfirmasi pembuatan email kustom dengan menekan tombol di bawah ini.`;
+  const inlineText = `Deploy system custom email:\n\n- Pilihan nama: \`${requestedName}\`\n- Biaya pemotongan: \`${cost} Poin\`\n\nSilakan konfirmasi pembuatan email kustom dengan menekan tombol di bawah ini.`;
 
   try {
     await bot.sendMessage(chatId, inlineText, {
@@ -437,9 +571,37 @@ Silakan konfirmasi pembuatan email kustom dengan menekan tombol di bawah ini.`;
   } catch (err) {}
 });
 
+bot.on('callback_query', async (callbackQuery) => {
+  const chatId = String(callbackQuery.message.chat.id).trim();
+  const data = callbackQuery.data;
+
+  try {
+    if (data === 'run_mail_random') {
+      const result = await createTemporaryEmailSession(chatId, 'random');
+      await bot.editMessageText(`✅ Sesi email acak berhasil dibuat!\n\n- Alamat email: \`${result.address}\`\n- Biaya: \`${result.cost} Poin\`\n- Berlaku sampai: \`${result.expiryText}\``, {
+        chat_id: chatId,
+        message_id: callbackQuery.message.message_id,
+        parse_mode: 'Markdown'
+      });
+      await bot.answerCallbackQuery(callbackQuery.id, { text: 'Email acak berhasil dibuat.' });
+    } else if (data === 'run_mail_custom') {
+      const result = await createTemporaryEmailSession(chatId, 'custom');
+      customNameStorage.delete(chatId);
+      await bot.editMessageText(`✅ Sesi email custom berhasil dibuat!\n\n- Alamat email: \`${result.address}\`\n- Biaya: \`${result.cost} Poin\`\n- Berlaku sampai: \`${result.expiryText}\``, {
+        chat_id: chatId,
+        message_id: callbackQuery.message.message_id,
+        parse_mode: 'Markdown'
+      });
+      await bot.answerCallbackQuery(callbackQuery.id, { text: 'Email custom berhasil dibuat.' });
+    }
+  } catch (err) {
+    await bot.answerCallbackQuery(callbackQuery.id, { text: err.message || 'Gagal membuat email. Coba lagi.', show_alert: true });
+  }
+});
+
 bot.onText(/\/checkinbox/i, async (msg) => {
   const chatId = String(msg.chat.id).trim();
-  const user = await verifyUser(chatId, msg.from.first_name); 
+  const user = await verifyUser(chatId, msg.from.first_name, msg.from.username); 
   if (!user.activeEmailToken || !user.activeEmail) {
     return bot.sendMessage(chatId, `*Kotak Sesi Kosong*\n\nSesi email kamu terdeteksi kosong atau masa berlakunya sudah habis. Silakan buat sesi baru agar aku bisa cek pesan masuknya.`, { parse_mode: 'Markdown' });
   }
@@ -530,24 +692,90 @@ bot.onText(/\/settier(?:\s+(\d+)\s+(\S+)(?:\s+(\d+))?)?/i, async (msg, match) =>
   }
 });
 
-bot.onText(/\/sendmessage(?:\s+(\d+))?/, async (msg, match) => {
+bot.onText(/\/setmessagequota(?:\s+(\d+)\s+(\d+))?/i, async (msg, match) => {
   const chatId = String(msg.chat.id).trim();
   const fromId = String(msg.from?.id).trim();
   if (fromId !== String(OWNER_ID)) return bot.sendMessage(chatId, 'Hanya Owner yang dapat menggunakan perintah ini.');
 
+  if (!match || !match[1] || !match[2]) {
+    return bot.sendMessage(chatId, 'Usage: /setmessagequota <userId> <jumlahPesan>');
+  }
+
+  const targetId = String(match[1]).trim();
+  const quota = parseInt(match[2], 10);
+  if (Number.isNaN(quota) || quota < 0) return bot.sendMessage(chatId, 'Jumlah pesan tidak valid.');
+
+  const db = await readDB();
+  if (!db.users[targetId]) {
+    db.users[targetId] = { name: 'Unknown', points: 0, sendMessageQuota: 0 };
+  }
+  const prevQuota = db.users[targetId].sendMessageQuota || 0;
+  db.users[targetId].sendMessageQuota = quota;
+  await writeDB(db);
+
+  await bot.sendMessage(chatId, `Kuota SendMessage anon untuk user ${targetId} diset dari ${prevQuota} menjadi ${quota}.`);
+  try {
+    await bot.sendMessage(Number(targetId), `Kuota SendMessage anon kamu telah diperbarui menjadi ${quota} pesan.`, { parse_mode: 'Markdown' });
+  } catch (err) {
+    await bot.sendMessage(chatId, `Peringatan: tidak dapat mengirim notifikasi ke user ${targetId}.`, { parse_mode: 'Markdown' });
+  }
+});
+
+bot.onText(/\/sendmessage(?:\s+(\S+))?/, async (msg, match) => {
+  const chatId = String(msg.chat.id).trim();
+  const fromId = String(msg.from?.id).trim();
+  const db = await readDB();
+  const user = await verifyUser(chatId, msg.from.first_name, msg.from.username);
+
   const text = String(msg.text || '').trim();
   const parts = text.split(' ').slice(1);
-  const targetId = parts.shift();
+  let targetId = parts.shift();
   const messageText = parts.join(' ').trim();
 
   if (!targetId || !messageText) {
-    return bot.sendMessage(chatId, 'Usage: /sendmessage <userId> <message>');
+    return bot.sendMessage(chatId, 'Usage: /sendmessage <userId|@username> <message>');
+  }
+
+  if (!/^@/.test(targetId) && isNaN(Number(targetId))) {
+    targetId = `@${targetId}`;
+  }
+
+  if (fromId !== String(OWNER_ID)) {
+    if (!user.sendMessageQuota || user.sendMessageQuota <= 0) {
+      return bot.sendMessage(chatId, 'Kamu belum memiliki langganan anon chat. Gunakan /sendsubscribe untuk membeli paket 10 pesan seharga Rp7.000.');
+    }
   }
 
   try {
-    await bot.sendMessage(Number(targetId), messageText);
-    await bot.sendMessage(chatId, `Pesan berhasil dikirim ke user ${targetId}.`);
+    let targetChatId = targetId;
+    let resolvedTargetUsername = targetId;
+
+    if (/^@/.test(targetId)) {
+      const normalizedTargetUsername = targetId.slice(1).toLowerCase();
+      const dbTargetEntry = Object.entries(db.users).find(([, entry]) => entry.username === normalizedTargetUsername);
+      if (dbTargetEntry) {
+        targetChatId = Number(dbTargetEntry[0]);
+      } else {
+        const targetChat = await bot.getChat(targetId);
+        targetChatId = targetChat.id;
+      }
+    }
+
+    await bot.sendMessage(targetChatId, messageText);
+
+    if (fromId !== String(OWNER_ID)) {
+      user.sendMessageQuota = Math.max(0, (user.sendMessageQuota || 0) - 1);
+      db.users[chatId] = user;
+      await writeDB(db);
+    }
+
+    const remainingText = fromId !== String(OWNER_ID) ? ` Sisa kuota anon chat: \`${user.sendMessageQuota}\`.` : '';
+    await bot.sendMessage(chatId, `Pesan berhasil dikirim ke user ${targetId}.${remainingText}`);
   } catch (err) {
-    await bot.sendMessage(chatId, `Gagal mengirim pesan ke user ${targetId}: ${err.message}`);
+    const description = err.response && err.response.body && err.response.body.description ? err.response.body.description : err.message;
+    const helpText = description && /chat not found/i.test(description)
+      ? 'Pastikan pengguna sudah memulai obrolan dengan bot atau gunakan ID Telegram numeric, bukan username.'
+      : '';
+    await bot.sendMessage(chatId, `Gagal mengirim pesan ke user ${targetId}: ${description}${helpText ? '\n' + helpText : ''}`);
   }
 });
